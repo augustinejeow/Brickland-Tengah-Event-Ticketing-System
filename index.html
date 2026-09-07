@@ -901,6 +901,24 @@ function eventStatus(ev) {
   if (end && now > end) return "ended";
   return "live";
 }
+// datetime-local inputs use an unqualified "YYYY-MM-DDTHH:mm" string with no
+// timezone info, interpreted by the browser as local wall-clock time. To keep
+// the *same* stored value meaning the same instant everywhere (this browser,
+// any other admin's browser, and the edge functions running in UTC), we
+// convert to/from a real UTC ISO string (with a "Z") at the form boundary.
+function toDatetimeLocalValue(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fromDatetimeLocalValue(v) {
+  if (!v) return "";
+  const d = new Date(v); // no offset in v -> parsed as this browser's local time
+  if (isNaN(d.getTime())) return "";
+  return d.toISOString();
+}
 
 /* ---------------- HOME ---------------- */
 async function renderHome() {
@@ -1862,8 +1880,8 @@ function adminSettingsTab(ev) {
       <p class="muted" style="margin-top:-4px;">While unpublished, this event is hidden from the Home listing &mdash; useful while you're still setting it up.</p>
       <label>Event name</label><input name="name" value="${esc(ev.name)}" required>
       <label>Description</label><textarea name="description" rows="2">${esc(ev.description || "")}</textarea>
-      <label>Start time</label><input name="startTime" type="datetime-local" value="${esc(ev.startTime || "")}">
-      <label>End time</label><input name="endTime" type="datetime-local" value="${esc(ev.endTime || "")}">
+      <label>Start time</label><input name="startTime" type="datetime-local" value="${esc(toDatetimeLocalValue(ev.startTime))}">
+      <label>End time</label><input name="endTime" type="datetime-local" value="${esc(toDatetimeLocalValue(ev.endTime))}">
       <p class="muted" style="margin-top:-4px;">Participants can only sign in between these times. Leave blank for no restriction.</p>
       <label>Number of participants (capacity)</label><input name="maxParticipants" type="number" min="1" value="${ev.maxParticipants || ""}" placeholder="e.g. 400">
       <label style="display:flex;align-items:center;gap:8px;"><input type="checkbox" name="codeEnabled" style="width:auto;" ${ev.codeEnabled ? "checked" : ""}> Require an event code at sign-in</label>
@@ -2549,8 +2567,8 @@ document.addEventListener("submit", async function (e) {
       await updateEvent(eventId, (ev) => {
         ev.name = fd.get("name").trim();
         ev.description = fd.get("description") || "";
-        ev.startTime = fd.get("startTime") || "";
-        ev.endTime = fd.get("endTime") || "";
+        ev.startTime = fromDatetimeLocalValue(fd.get("startTime"));
+        ev.endTime = fromDatetimeLocalValue(fd.get("endTime"));
         ev.maxParticipants = fd.get("maxParticipants") ? parseInt(fd.get("maxParticipants"), 10) : null;
         ev.codeEnabled = fd.get("codeEnabled") === "on";
         ev.code = fd.get("code") || "";
