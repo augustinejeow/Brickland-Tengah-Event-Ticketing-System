@@ -82,6 +82,21 @@
   .scanner-status{margin:10px 0;font-size:13px;text-align:center;min-height:34px;color:#e9ecef;}
   .scanner-status.error{color:#ff8787;}
   .scanner-status.success{color:#69db7c;font-weight:700;}
+  .tour-blocker{position:fixed;inset:0;z-index:2000;background:transparent;}
+  .tour-target{position:relative;z-index:2001;box-shadow:0 0 0 6px rgba(255,255,255,.95),0 0 0 9999px rgba(20,18,15,.72);border-radius:12px;}
+  .tour-tooltip{position:fixed;z-index:2002;background:#fff;color:var(--text);border-radius:14px;padding:16px;max-width:320px;width:calc(100% - 32px);box-shadow:0 10px 40px rgba(0,0,0,.35);}
+  .tour-tooltip h4{margin:0 0 6px;font-size:15px;}
+  .tour-tooltip p{margin:0 0 12px;font-size:13.5px;color:var(--muted);line-height:1.5;}
+  .tour-actions{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .tour-step-indicator{font-size:11px;color:var(--muted);margin-bottom:4px;}
+  .tour-popup-overlay{position:fixed;inset:0;background:rgba(20,18,15,.6);z-index:2003;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .tour-popup-card{background:#fff;border-radius:16px;padding:24px;max-width:340px;text-align:center;}
+  .tour-popup-card h3{margin:0 0 8px;}
+  .tour-popup-card p{color:var(--muted);font-size:14px;margin:0 0 18px;}
+  .tour-popup-actions{display:flex;gap:10px;justify-content:center;}
+  .star-rating{display:flex;gap:6px;justify-content:center;font-size:28px;}
+  .star-rating .star{color:#d8d4cb;transition:color .15s;cursor:pointer;}
+  .star-rating .star.filled{color:#f5a623;}
   .scanner-manual{margin-top:8px;border-top:1px solid rgba(255,255,255,.15);padding-top:10px;}
   .scanner-manual label{color:#ced4da;font-size:11.5px;display:block;margin-bottom:6px;}
   .scanner-manual input{margin-bottom:8px;}
@@ -177,7 +192,7 @@ function eventToRow(ev) {
   };
 }
 function defaultProgress() {
-  return { boothRedeemed: {}, tasksDone: {}, passportRedeemed: {}, feedbackSubmitted: false, feedbackAnswers: null, luckyDrawNumber: null, triviaDone: {}, triviaRedeemed: {} };
+  return { boothRedeemed: {}, tasksDone: {}, passportRedeemed: {}, feedbackSubmitted: false, feedbackAnswers: null, luckyDrawNumber: null, triviaDone: {}, triviaRedeemed: {}, appRating: null };
 }
 function formatLuckyNumber(ev, num) {
   const prefix = (ev.luckyDraw && ev.luckyDraw.prefix) || "";
@@ -235,7 +250,8 @@ async function loadProgress(eventId, username, ticketSlot) {
     feedbackAnswers: data.feedback_answers || null,
     luckyDrawNumber: data.lucky_draw_number != null ? data.lucky_draw_number : null,
     triviaDone: data.trivia_done || {},
-    triviaRedeemed: data.trivia_redeemed || {}
+    triviaRedeemed: data.trivia_redeemed || {},
+    appRating: data.app_rating != null ? data.app_rating : null
   };
 }
 async function saveProgress(eventId, username, ticketSlot, pstate) {
@@ -252,6 +268,7 @@ async function saveProgress(eventId, username, ticketSlot, pstate) {
     lucky_draw_number: pstate.luckyDrawNumber != null ? pstate.luckyDrawNumber : null,
     trivia_done: pstate.triviaDone || {},
     trivia_redeemed: pstate.triviaRedeemed || {},
+    app_rating: pstate.appRating != null ? pstate.appRating : null,
     updated_at: new Date().toISOString()
   };
   const { error } = await sb.from("participant_progress").upsert(row, { onConflict: "event_id,username,ticket_slot" });
@@ -287,6 +304,10 @@ async function insertDraw(eventId, prizeRank, number, username, ticketSlot) {
 async function deleteAllDraws(eventId) {
   const { error } = await sb.from("lucky_draw_draws").delete().eq("event_id", eventId);
   if (error) console.error("deleteAllDraws", error);
+}
+async function deleteDraw(eventId, prizeRank) {
+  const { error } = await sb.from("lucky_draw_draws").delete().eq("event_id", eventId).eq("prize_rank", prizeRank);
+  if (error) console.error("deleteDraw", error);
 }
 function ordinal(n) {
   const s = ["th", "st", "nd", "rd"];
@@ -568,7 +589,15 @@ const TRANSLATIONS = {
     scanner_title_task: "Scan QR to complete: ", scanner_title_redeem: "Scan QR to redeem: ",
     something_wrong: "Something went wrong.", already_reached_limit: "This coupon has already reached its redemption limit.",
     footer_note: "Carnival Coupon Testbed &middot; live shared data via Supabase &middot; sign-in still under test",
-    footer_admin_login: "Admin login"
+    footer_admin_login: "Admin login",
+    tour_popup_title: "Want a quick tour?", tour_popup_text: "We'll show you around this page in a few quick steps.",
+    tour_btn_yes: "Yes, show me", tour_btn_skip: "Skip", tour_btn_next: "Next", tour_btn_prev: "Back", tour_btn_done: "Done",
+    tour_step_of: "Step {n} of {total}", tour_replay: "Take the tour again",
+    tour_booths_title: "Booth Coupons", tour_booths_text: "Tap here to see the booth coupons for this event. When you visit a booth, ask staff to scan you in, or scan the QR code at the booth yourself once you've redeemed it.",
+    tour_passport_title: "Passport", tour_passport_text: "Open your Passport here. Tap \"I have completed\" on a task, then scan that task's QR code the same way to mark it done.",
+    tour_luckydraw_title: "Lucky Draw", tour_luckydraw_text: "Get your Lucky Draw number here. Keep it safe -- winning numbers are announced at the draw.",
+    tour_social_title: "Stay Connected", tour_social_text: "Follow these links to stay connected with the community after the event.",
+    rate_app_h: "Rate this app", rate_app_p: "How was your experience using this app?", rate_app_thanks: "Thanks for the feedback!"
   },
   zh: {
     home_title: "Brickland-Tengah 活动售票系统", home_sub: "请选择您要参加的活动",
@@ -659,7 +688,15 @@ const TRANSLATIONS = {
     scanner_title_task: "扫码以完成：", scanner_title_redeem: "扫码以兑换：",
     something_wrong: "出现错误，请重试。", already_reached_limit: "此优惠券已达到兑换上限。",
     footer_note: "嘉年华优惠券测试平台 &middot; 通过 Supabase 实时共享数据 &middot; 登录功能仍在测试中",
-    footer_admin_login: "管理员登录"
+    footer_admin_login: "管理员登录",
+    tour_popup_title: "需要快速导览吗？", tour_popup_text: "我们将用几个简单步骤带您了解本页面。",
+    tour_btn_yes: "好的，开始导览", tour_btn_skip: "跳过", tour_btn_next: "下一步", tour_btn_prev: "上一步", tour_btn_done: "完成",
+    tour_step_of: "第 {n} 步，共 {total} 步", tour_replay: "重新开始导览",
+    tour_booths_title: "摊位优惠券", tour_booths_text: "点击此处查看本活动的摊位优惠券。到访摊位时，请工作人员为您扫码，或在兑换后自行扫描该摊位的二维码。",
+    tour_passport_title: "护照任务", tour_passport_text: "在此打开护照任务。点击某项任务的“我已完成”，然后用同样的方式扫描该任务的二维码以标记完成。",
+    tour_luckydraw_title: "幸运抽奖", tour_luckydraw_text: "在此领取您的幸运抽奖号码。请妥善保管——中奖号码将在抽奖时公布。",
+    tour_social_title: "保持联系", tour_social_text: "关注这些链接，活动结束后继续与社区保持联系。",
+    rate_app_h: "为本应用评分", rate_app_p: "您使用本应用的体验如何？", rate_app_thanks: "感谢您的反馈！"
   },
   ms: {
     home_title: "Sistem Tiket Acara Brickland-Tengah", home_sub: "Pilih acara yang anda sertai",
@@ -750,7 +787,114 @@ const TRANSLATIONS = {
     scanner_title_task: "Imbas QR untuk selesaikan: ", scanner_title_redeem: "Imbas QR untuk menebus: ",
     something_wrong: "Sesuatu tidak kena.", already_reached_limit: "Kupon ini telah mencapai had tebusan.",
     footer_note: "Platform Ujian Kupon Karnival &middot; data dikongsi secara langsung melalui Supabase &middot; log masuk masih dalam ujian",
-    footer_admin_login: "Log Masuk Admin"
+    footer_admin_login: "Log Masuk Admin",
+    tour_popup_title: "Mahu lawatan ringkas?", tour_popup_text: "Kami akan tunjukkan halaman ini dalam beberapa langkah ringkas.",
+    tour_btn_yes: "Ya, tunjukkan", tour_btn_skip: "Langkau", tour_btn_next: "Seterusnya", tour_btn_prev: "Kembali", tour_btn_done: "Selesai",
+    tour_step_of: "Langkah {n} daripada {total}", tour_replay: "Mula semula lawatan",
+    tour_booths_title: "Kupon Gerai", tour_booths_text: "Ketik di sini untuk melihat kupon gerai bagi acara ini. Semasa melawat gerai, minta kakitangan mengimbas anda, atau imbas sendiri kod QR gerai selepas menebus.",
+    tour_passport_title: "Pasport", tour_passport_text: "Buka Pasport anda di sini. Ketik \"Saya telah selesai\" pada satu tugasan, kemudian imbas kod QR tugasan itu dengan cara yang sama untuk menandakannya selesai.",
+    tour_luckydraw_title: "Cabutan Bertuah", tour_luckydraw_text: "Dapatkan nombor Cabutan Bertuah anda di sini. Simpan baik-baik -- nombor pemenang akan diumumkan semasa cabutan.",
+    tour_social_title: "Kekal Berhubung", tour_social_text: "Ikuti pautan ini untuk terus berhubung dengan komuniti selepas acara.",
+    rate_app_h: "Nilai aplikasi ini", rate_app_p: "Bagaimana pengalaman anda menggunakan aplikasi ini?", rate_app_thanks: "Terima kasih atas maklum balas anda!"
+  },
+  ta: {
+    home_title: "Brickland-Tengah நிகழ்வு டிக்கெட் முறை", home_sub: "நீங்கள் பங்கேற்கும் நிகழ்வைத் தேர்ந்தெடுக்கவும்",
+    home_section_h: "இப்போது நடைபெறும் நிகழ்வுகள்", home_empty: "இதுவரை நிகழ்வுகள் இல்லை. நிர்வாகியிடம் ஒன்றை உருவாக்கச் சொல்லுங்கள்.",
+    status_upcoming: "விரைவில்", status_live: "நடைபெறுகிறது", status_ended: "முடிந்தது",
+    refresh: "புதுப்பிக்க",
+    signin_sub: "தொடர உள்நுழையவும்", signin_hint: "சோதனை கட்டம்: சோதனைக் கணக்குடன் உள்நுழையவும். மின்னஞ்சல் OTP தற்போது முடக்கப்பட்டுள்ளது.",
+    signin_hint_otp: "நீங்கள் பதிவு செய்த மின்னஞ்சல் முகவரியை உள்ளிடவும். ஒருமுறை பயன்படுத்தும் உள்நுழைவு குறியீட்டை அனுப்புவோம்.",
+    signin_otp_sent: "{email} க்கு 4 இலக்க குறியீடு அனுப்பப்பட்டது. உள்நுழைய கீழே உள்ளிடவும்.",
+    label_username: "பயனர் பெயர்", label_password: "கடவுச்சொல்", label_eventcode: "நிகழ்வு குறியீடு", placeholder_eventcode: "நிகழ்வு குறியீட்டை உள்ளிடவும்",
+    label_email: "மின்னஞ்சல் முகவரி", label_otp: "4 இலக்க குறியீடு",
+    btn_signin: "உள்நுழைக", btn_send_otp: "எனக்கு குறியீடு அனுப்பவும்", btn_verify_otp: "சரிபார்த்து உள்நுழைக",
+    link_resend_otp: "குறியீட்டை மீண்டும் அனுப்பவும்", link_change_email: "வேறு மின்னஞ்சலைப் பயன்படுத்தவும்",
+    signin_valid_accounts: "செல்லுபடியாகும் சோதனைக் கணக்குகள்:", signin_password_label: "கடவுச்சொல்:",
+    err_not_eligible: "இந்த மின்னஞ்சல் இந்த நிகழ்விற்கான விருந்தினர் பட்டியலில் இல்லை. நிகழ்வு ஏற்பாட்டாளரிடம் சரிபார்க்கவும்.",
+    err_capacity_full: "உங்கள் டிக்கெட்டுகள் வெற்றிகரமாக பெறப்பட்டுவிட்டன.",
+    err_no_pending_code: "இந்த மின்னஞ்சலுக்கு நிலுவையில் உள்ள குறியீடு இல்லை. புதிய குறியீட்டைக் கோரவும்.",
+    err_expired: "அந்த குறியீடு காலாவதியானது. புதிய குறியீட்டைக் கோரவும்.",
+    err_incorrect_code_otp: "தவறான குறியீடு. {n} முயற்சி(கள்) மீதம் உள்ளன.",
+    err_too_many_attempts: "மிக அதிக தவறான முயற்சிகள். புதிய குறியீட்டைக் கோரவும்.",
+    err_too_soon: "மற்றொரு குறியீட்டைக் கோருவதற்கு முன் சிறிது காத்திருக்கவும்.",
+    err_email_send_failed: "தற்போது மின்னஞ்சலை அனுப்ப முடியவில்லை. விரைவில் மீண்டும் முயற்சிக்கவும்.",
+    err_invalid_link: "இந்த இணைப்பு இனி செல்லுபடியாகாது.",
+    err_server: "ஏதோ தவறு நடந்தது. மீண்டும் முயற்சிக்கவும்.",
+    err_not_started: "இந்த நிகழ்வு இன்னும் தொடங்கவில்லை.", err_ended: "இந்த நிகழ்வு முடிந்துவிட்டது.",
+    share_title: "இந்த டிக்கெட்டைப் பகிரவும்", share_hint: "இந்த இணைப்பை (எ.கா. WhatsApp வழியாக) அனுப்பி உங்கள் டிக்கெட்டைப் பகிரவும். இதைத் திறக்கும் எவரும் குறியீடு தேவையின்றி நேரடியாக உள்ளே செல்வார்கள், மேலும் உங்களைப் போலவே அதே பயன்பாட்டு நிலையைக் காண்பார்கள் -- உங்களில் ஒருவர் ஏதேனும் பெற்றுக்கொண்டால், அது அனைவருக்கும் பெறப்பட்டதாகக் காட்டப்படும்.",
+    btn_copy_link: "இணைப்பை நகலெடுக்கவும்", link_copied: "நகலெடுக்கப்பட்டது!", link_copy_manual: "இந்த இணைப்பை நகலெடுக்கவும்:",
+    claim_working: "உங்களை உள்நுழைக்கிறோம்…", claim_error_title: "உங்களை உள்நுழைக்க முடியவில்லை",
+    err_invalid_login: "தவறான பயனர்பெயர் அல்லது கடவுச்சொல். test_user1-10 மற்றும் P@ssw0rd ஐப் பயன்படுத்தவும்.", err_event_not_found: "நிகழ்வு கிடைக்கவில்லை.",
+    err_incorrect_code: "தவறான நிகழ்வு குறியீடு.", err_task_not_found: "பணி கிடைக்கவில்லை.", err_item_not_found: "பொருள் கிடைக்கவில்லை.",
+    signin_closed_upcoming: "இந்த நிகழ்வு இன்னும் தொடங்கவில்லை. உள்நுழைவு {time} அன்று திறக்கும்.",
+    signin_closed_ended: "இந்த நிகழ்வு முடிந்துவிட்டது. உள்நுழைவு {time} அன்று மூடப்பட்டது.", signin_unavailable_sub: "உள்நுழைவு கிடைக்கவில்லை",
+    signed_in_as: "இவராக உள்நுழைந்துள்ளீர்கள்",
+    nav_booths: "அரங்க கூப்பன்கள்", nav_booths_sub: "{n} அரங்க(ங்கள்) கிடைக்கின்றன",
+    nav_passport: "பாஸ்போர்ட்", nav_passport_sub: "{done}/{total} பணிகள் முடிந்தன",
+    nav_feedback: "கருத்து", nav_feedback_submitted: "சமர்ப்பிக்கப்பட்டது &mdash; நன்றி!", nav_feedback_prompt: "நாங்கள் எப்படி செய்தோம் என்று சொல்லுங்கள்",
+    nav_trivia: "வினாடி வினா பூங்கா", nav_trivia_sub: "{done}/{total} பணிகள் முடிந்தன",
+    nav_tutorial: "பயிற்சி", nav_tutorial_sub: "இந்த தளத்தை எப்படி பயன்படுத்துவது",
+    booths_card_h: "அரங்க கூப்பன்கள்", booths_card_p: "நீங்கள் விஜயம் செய்யும்போது / பெறும்போது அரங்க பணியாளர்களை உங்களை ஸ்கேன் செய்யச் சொல்லுங்கள் &mdash; ஒவ்வொரு அரங்கிலும் QR குறியீடு இருக்கும்.",
+    passport_card_p_done: "{done}/{total} பணிகள் முடிந்தன. பெறுதல் கூப்பன்கள் திறக்கப்பட்டுள்ளன!",
+    passport_card_p_locked: "{done}/{total} பணிகள் முடிந்தன. பெறுதல் கூப்பன்களைத் திறக்க கட்டாயப் பணிகளை முடிக்கவும்.",
+    btn_open_passport: "பாஸ்போர்ட்டைத் திறக்கவும்",
+    luckydraw_h: "🎁 அதிர்ஷ்ட சீட்டு", luckydraw_your_number: "உங்கள் அதிர்ஷ்ட சீட்டு எண்", luckydraw_closed: "அதிர்ஷ்ட சீட்டு பதிவு இப்போது மூடப்பட்டது.",
+    btn_get_lucky_number: "எனது அதிர்ஷ்ட சீட்டு எண்ணைப் பெறவும்", luckydraw_terms_default: "விதிமுறைகள் மற்றும் நிபந்தனைகள் அறிவிக்கப்படும்.",
+    social_h: "தொடர்பில் இருங்கள்", map_h: "நிகழ்வு வரைபடம்", btn_signout: "வெளியேறு",
+    status_not_redeemed: "இன்னும் பெறப்படவில்லை", status_redeemed: "பெறப்பட்டது", status_used_of_limit: "{used}/{limit} பயன்படுத்தப்பட்டது",
+    status_n_redeemed: "{n} பெறப்பட்டது", btn_redeem: "பெறவும்", status_fully_redeemed: "முழுவதும் பெறப்பட்டது",
+    passport_title: "பாஸ்போர்ட்", passport_tasks_h: "பணிகள்",
+    passport_tasks_p: "\"நான் முடித்துவிட்டேன்\" என்பதைத் தட்டி, அரங்கின் QR குறியீட்டை உங்கள் கேமராவால் ஸ்கேன் செய்து ஒரு பணியை முடிந்ததாகக் குறிக்கவும்.",
+    passport_no_tasks: "பணிகள் எதுவும் அமைக்கப்படவில்லை.",
+    badge_compulsory: "கட்டாயம்", badge_optional: "விருப்பம்", badge_done: "முடிந்தது", badge_pending: "நிலுவையில்",
+    btn_i_have_completed: "நான் முடித்துவிட்டேன்",
+    redemption_coupons_h: "பெறுதல் கூப்பன்கள்",
+    redemption_coupons_p: "பெறும்போது பெறுதல் கவுண்டர் பணியாளர்களை உங்களை ஸ்கேன் செய்யச் சொல்லுங்கள் &mdash; அங்கு QR குறியீடு இருக்கும்.",
+    redemption_none: "பெறுதல் பொருட்கள் எதுவும் அமைக்கப்படவில்லை.", redemption_locked: "பெறுதல் கூப்பன்களைத் திறக்க அனைத்து கட்டாயப் பணிகளையும் முடிக்கவும்.",
+    trivia_disabled: "இந்த நிகழ்விற்கு வினாடி வினா பூங்கா கிடைக்கவில்லை.", back_to_event: "நிகழ்வுக்குத் திரும்பு",
+    trivia_title: "வினாடி வினா பூங்கா", trivia_quests_h: "பணிகள்",
+    trivia_quests_p: "ஒவ்வொரு பணியையும் கிளிக் செய்து பொருளைப் படித்து வினாடி வினா கேள்விகளை முயற்சிக்கவும்.",
+    trivia_no_quests: "பணிகள் எதுவும் அமைக்கப்படவில்லை.", btn_review: "மதிப்பாய்வு", btn_play_quest: "பணியை விளையாடு",
+    trivia_redemption_locked: "பெறுதல் கூப்பன்களைத் திறக்க அனைத்து கட்டாயப் பணிகளையும் முடிக்கவும்.",
+    q_prefix: "Q", pick_answer: "உங்கள் பதிலைத் தேர்ந்தெடுக்கவும்&hellip;",
+    textarea_placeholder: "உங்கள் பதில் (வேடிக்கைக்காக மட்டும் -- மதிப்பீடு செய்யப்படாது)", reveal_answer: "பதிலைக் காட்டு", trivia_h: "வினாடி வினா",
+    quest_done_msg: "இந்த பணியை ஏற்கனவே முடித்துவிட்டீர்கள். அருமை!", btn_mark_complete: "பணியை முடிந்ததாகக் குறி",
+    feedback_title: "கருத்து", feedback_already: "இந்த நிகழ்விற்கான கருத்தை ஏற்கனவே சமர்ப்பித்துவிட்டீர்கள். நன்றி!",
+    btn_submit_feedback: "கருத்தைச் சமர்ப்பிக்கவும்", select_answer_placeholder: "பதிலைத் தேர்ந்தெடுக்கவும்&hellip;",
+    thank_you_title: "நன்றி", default_ack: "உங்கள் கருத்திற்கு நன்றி!", btn_back_to_event: "நிகழ்வுப் பக்கத்திற்குத் திரும்பு",
+    tutorial_title: "பயிற்சி", tutorial_disabled: "இந்த நிகழ்விற்கு பயிற்சி கிடைக்கவில்லை.",
+    tutorial_h_signin: "1. உள்நுழைதல்",
+    tutorial_p_signin: "முகப்புப் பக்கத்தில் இருந்து, நீங்கள் பங்கேற்கும் நிகழ்வைத் தட்டவும், பின்னர் உங்களுக்கு வழங்கப்பட்ட பயனர்பெயர் மற்றும் கடவுச்சொல்லுடன் உள்நுழையவும். நீங்கள் வெளியேறும் வரை இந்த சாதனத்தில் உங்கள் உள்நுழைவு தொடர்ந்திருக்கும்.",
+    tutorial_h_booths: "2. அரங்க கூப்பன்களைப் பெறுதல்",
+    tutorial_p_booths: "நிகழ்வுப் பக்கத்தில், ஒரு அரங்கின் அருகில் \"பெறவும்\" என்பதைத் தட்டவும், பின்னர் அந்த அரங்கில் காட்டப்படும் QR குறியீட்டில் உங்கள் கேமராவைக் காட்டவும். வெற்றிகரமாக ஸ்கேன் செய்தவுடன் அது தானாகவே \"பெறப்பட்டது\" எனக் குறிக்கப்படும்.",
+    tutorial_h_passport: "3. உங்கள் பாஸ்போர்ட்டை முடித்தல்",
+    tutorial_p_passport: "நிகழ்வுப் பக்கத்திலிருந்து பாஸ்போர்ட்டைத் திறக்கவும், பின்னர் ஒரு பணியின் அருகில் \"நான் முடித்துவிட்டேன்\" என்பதைத் தட்டி அதே வழியில் அந்த பணியின் QR குறியீட்டை ஸ்கேன் செய்யவும். பாஸ்போர்ட்டின் பெறுதல் கூப்பன்களைத் திறக்க அனைத்து கட்டாயப் பணிகளையும் முடிக்கவும்.",
+    tutorial_h_trivia: "4. வினாடி வினா பூங்கா",
+    tutorial_p_trivia: "இந்த நிகழ்விற்கு வினாடி வினா பூங்கா கிடைத்தால், நிகழ்வுப் பக்கத்திலிருந்து அதைத் திறந்து, ஒவ்வொரு பணியிலும் கிளிக் செய்து கற்று கேள்விகளுக்கு பதிலளித்து, பின்னர் முடிந்ததாகக் குறிக்கவும். அனைத்து கட்டாயப் பணிகளையும் முடிப்பது வினாடி வினா பெறுதல் கூப்பன்களைத் திறக்கும் &mdash; அரங்கிற்குச் செல்ல தேவையில்லை.",
+    tutorial_h_feedback: "5. கருத்து தெரிவித்தல்",
+    tutorial_p_feedback: "நீங்கள் புறப்படுவதற்கு முன், நிகழ்வுப் பக்கத்திலிருந்து கருத்தைத் திறந்து, எதிர்கால நிகழ்வுகளை மேம்படுத்த ஏற்பாட்டாளருக்கு உதவ சில குறுகிய கேள்விகளுக்குப் பதிலளிக்கவும்.",
+    scanner_manual_label: "கேமரா வேலை செய்யவில்லையா? பதிலாக ஸ்கேன் செய்யப்பட்ட இணைப்பை இங்கே ஒட்டவும்:",
+    scanner_manual_placeholder: "இணைப்பை இங்கே ஒட்டவும்", btn_submit: "சமர்ப்பிக்கவும்",
+    scanner_point_camera: "அரங்கின் QR குறியீட்டில் உங்கள் கேமராவைக் காட்டவும்.",
+    scanner_no_camera: "இந்த உலாவியில் கேமரா அணுகல் கிடைக்கவில்லை. பதிலாக கீழே ஸ்கேன் செய்யப்பட்ட இணைப்பை ஒட்டவும்.",
+    scanner_camera_error: "உங்கள் கேமராவை அணுக முடியவில்லை ({msg}). பதிலாக கீழே ஸ்கேன் செய்யப்பட்ட இணைப்பை ஒட்டவும்.",
+    scanner_checking: "சரிபார்க்கிறது&hellip;", scanner_not_signed_in: "நீங்கள் உள்நுழையவில்லை.",
+    scanner_task_completed: "முடிந்தது! ✅", scanner_redeemed: "பெறப்பட்டது! ✅",
+    scanner_wrong_qr: "தவறான QR குறியீடு — இது \"{name}\" க்கானது அல்ல. சரியான அரங்கின் QR குறியீட்டை ஸ்கேன் செய்யவும்.",
+    scanner_invalid_task_qr: "இது செல்லுபடியாகும் பணி QR குறியீடாகத் தெரியவில்லை. மீண்டும் முயற்சிக்கவும்.",
+    scanner_invalid_redemption_qr: "இது செல்லுபடியாகும் பெறுதல் QR குறியீடாகத் தெரியவில்லை. மீண்டும் முயற்சிக்கவும்.",
+    scanner_title_task: "முடிக்க QR ஸ்கேன் செய்யவும்: ", scanner_title_redeem: "பெற QR ஸ்கேன் செய்யவும்: ",
+    something_wrong: "ஏதோ தவறு நடந்தது.", already_reached_limit: "இந்த கூப்பன் ஏற்கனவே அதன் பெறுதல் வரம்பை எட்டிவிட்டது.",
+    footer_note: "கார்னிவல் கூப்பன் சோதனை &middot; Supabase வழியாக நேரடி பகிரப்பட்ட தரவு &middot; உள்நுழைவு இன்னும் சோதனையில் உள்ளது",
+    footer_admin_login: "நிர்வாக உள்நுழைவு",
+    tour_popup_title: "விரைவு வழிகாட்டி வேண்டுமா?", tour_popup_text: "இந்தப் பக்கத்தை சில எளிய படிகளில் உங்களுக்குக் காண்பிப்போம்.",
+    tour_btn_yes: "ஆம், காண்பியுங்கள்", tour_btn_skip: "தவிர்க்க", tour_btn_next: "அடுத்து", tour_btn_prev: "பின்", tour_btn_done: "முடிந்தது",
+    tour_step_of: "படி {n} / {total}", tour_replay: "மீண்டும் வழிகாட்டியைத் தொடங்கு",
+    tour_booths_title: "அரங்க கூப்பன்கள்", tour_booths_text: "இந்த நிகழ்வின் அரங்க கூப்பன்களைப் பார்க்க இங்கே தட்டவும். அரங்கிற்குச் செல்லும்போது பணியாளர்களை உங்களை ஸ்கேன் செய்யச் சொல்லுங்கள், அல்லது பெற்ற பிறகு அரங்கின் QR குறியீட்டை நீங்களே ஸ்கேன் செய்யவும்.",
+    tour_passport_title: "பாஸ்போர்ட்", tour_passport_text: "உங்கள் பாஸ்போர்ட்டை இங்கே திறக்கவும். ஒரு பணியில் \"நான் முடித்துவிட்டேன்\" என்பதைத் தட்டி, அதே வழியில் அந்த பணியின் QR குறியீட்டை ஸ்கேன் செய்து முடிந்ததாகக் குறிக்கவும்.",
+    tour_luckydraw_title: "அதிர்ஷ்ட சீட்டு", tour_luckydraw_text: "உங்கள் அதிர்ஷ்ட சீட்டு எண்ணை இங்கே பெறவும். அதைப் பத்திரமாக வைத்திருங்கள் -- வெற்றி பெறும் எண்கள் சீட்டு நேரத்தில் அறிவிக்கப்படும்.",
+    tour_social_title: "தொடர்பில் இருங்கள்", tour_social_text: "நிகழ்வுக்குப் பிறகும் சமூகத்துடன் தொடர்பில் இருக்க இந்த இணைப்புகளைப் பின்பற்றவும்.",
+    rate_app_h: "இந்த செயலியை மதிப்பிடவும்", rate_app_p: "இந்த செயலியைப் பயன்படுத்திய உங்கள் அனுபவம் எப்படி இருந்தது?", rate_app_thanks: "உங்கள் கருத்துக்கு நன்றி!"
   }
 };
 function t(key, vars) {
@@ -783,6 +927,7 @@ function langSwitcher() {
       <option value="en" ${l === "en" ? "selected" : ""}>English</option>
       <option value="zh" ${l === "zh" ? "selected" : ""}>中文（简体）</option>
       <option value="ms" ${l === "ms" ? "selected" : ""}>Bahasa Melayu</option>
+      <option value="ta" ${l === "ta" ? "selected" : ""}>தமிழ்</option>
     </select>
   </div>`;
 }
@@ -828,6 +973,7 @@ const POLL_PATHS = ["/", "/event", "/passport"];
 
 async function render() {
   const myToken = ++RENDER_TOKEN;
+  if (typeof endTour === "function") endTour();
   const app = document.getElementById("app");
   app.innerHTML = "<div class='card'>Loading&hellip;</div>";
   await ensureSeed();
@@ -1058,7 +1204,7 @@ async function renderEvent(params) {
 
   let boothsCard = "";
   if (ev.booths.length) {
-    boothsCard = `<div class="card" id="booths"><h3>${t("booths_card_h")}</h3><p class="muted">${t("booths_card_p")}</p>${ev.booths.map((b) => redeemRow(ev.id, "booth", b, pstate.boothRedeemed[b.id] || 0)).join("")}</div>`;
+    boothsCard = `<div class="card" id="booths" data-tour="booths"><h3>${t("booths_card_h")}</h3><p class="muted">${t("booths_card_p")}</p>${ev.booths.map((b) => redeemRow(ev.id, "booth", b, pstate.boothRedeemed[b.id] || 0)).join("")}</div>`;
   }
   let luckyCard = "";
   if (ev.luckyDraw && ev.luckyDraw.enabled) {
@@ -1074,14 +1220,14 @@ async function renderEvent(params) {
     } else {
       numberHtml = `<button class="btn secondary full" data-action="get-lucky-number" data-event="${ev.id}">${t("btn_get_lucky_number")}</button>`;
     }
-    luckyCard = `<div class="card"><h3>${t("luckydraw_h")}</h3>
+    luckyCard = `<div class="card" data-tour="luckydraw"><h3>${t("luckydraw_h")}</h3>
       ${numberHtml}
       <p class="muted" style="white-space:pre-wrap;margin-top:4px;">${esc(ev.luckyDraw.terms) || t("luckydraw_terms_default")}</p>
     </div>`;
   }
   let socialCard = "";
   if (ev.socialLinks.length) {
-    socialCard = `<div class="card"><h3>${t("social_h")}</h3>${ev.socialLinks.map((l) => `<a class="pill" target="_blank" rel="noopener" href="${esc(l.url)}">${esc(l.label)} &#8599;</a>`).join("")}</div>`;
+    socialCard = `<div class="card" data-tour="social"><h3>${t("social_h")}</h3>${ev.socialLinks.map((l) => `<a class="pill" target="_blank" rel="noopener" href="${esc(l.url)}">${esc(l.label)} &#8599;</a>`).join("")}</div>`;
   }
   let mapCard = "";
   if (ev.mapImage) {
@@ -1089,7 +1235,7 @@ async function renderEvent(params) {
   }
   let passportCard = "";
   if (ev.passport.tasks.length) {
-    passportCard = `<div class="card">
+    passportCard = `<div class="card" data-tour="passport">
       <h3>${t("nav_passport")}</h3>
       <p class="muted">${passportUnlocked ? t("passport_card_p_done", { done: tasksDoneCount, total: ev.passport.tasks.length }) : t("passport_card_p_locked", { done: tasksDoneCount, total: ev.passport.tasks.length })}</p>
       <a class="btn secondary" href="#/passport?event=${ev.id}">${t("btn_open_passport")}</a>
@@ -1111,6 +1257,21 @@ async function renderEvent(params) {
     } catch (err) { /* sharing is a nice-to-have; never block the event page on it */ }
   }
 
+  const tourReplay = ev.tutorialEnabled
+    ? `<div style="text-align:center;margin:-4px 0 10px;"><button class="btn small outline" data-action="start-tour" data-event="${ev.id}">${t("tour_replay")}</button></div>`
+    : "";
+
+  const rating = pstate.appRating;
+  const stars = [1, 2, 3, 4, 5].map((n) =>
+    `<span class="star ${rating && n <= rating ? "filled" : ""}" data-action="rate-app" data-event="${ev.id}" data-value="${n}">&#9733;</span>`
+  ).join("");
+  const rateAppCard = `<div class="card" style="text-align:center;">
+    <h3>${t("rate_app_h")}</h3>
+    <p class="muted">${t("rate_app_p")}</p>
+    <div class="star-rating">${stars}</div>
+    ${rating ? `<p class="muted" style="font-size:12px;">${t("rate_app_thanks")}</p>` : ""}
+  </div>`;
+
   return `
     ${topbar(ev.name, t("signed_in_as") + " " + sess.username)}
     ${langSwitcher()}
@@ -1122,7 +1283,9 @@ async function renderEvent(params) {
     ${luckyCard}
     ${shareCard}
     ${socialCard}
+    ${tourReplay}
     ${footerNote()}
+    ${rateAppCard}
   `;
 }
 
@@ -1442,25 +1605,51 @@ async function renderDrawSimulator(params) {
   const entries = await loadLuckyDrawEntries(ev.id);
   const draws = await loadDraws(ev.id);
   const totalPrizes = (ev.luckyDraw && ev.luckyDraw.numberOfPrizes) || 15;
+  const excludedNumbers = (ev.luckyDraw && ev.luckyDraw.excludedNumbers) || [];
+  const excluded = new Set(excludedNumbers);
   const drawnRanks = new Set(draws.map((d) => d.prize_rank));
   const drawnNumbers = new Set(draws.map((d) => d.number));
-  const remainingPool = entries.filter((e) => !drawnNumbers.has(e.number));
+  const remainingPool = entries.filter((e) => !drawnNumbers.has(e.number) && !excluded.has(e.number));
   let nextRank = null;
   for (let r = totalPrizes; r >= 1; r--) { if (!drawnRanks.has(r)) { nextRank = r; break; } }
 
   const rows = [];
   for (let r = totalPrizes; r >= 1; r--) {
     const d = draws.find((x) => x.prize_rank === r);
-    rows.push(`<div class="row">
-      <div><strong>${ordinal(r)} Prize</strong></div>
-      <div>${d ? `<strong>${esc(formatLuckyNumber(ev, d.number))}</strong> &mdash; ${esc(d.username)} <span class="muted" style="font-size:11px;">(Ticket ${d.ticket_slot || 1})</span>` : `<span class="muted">${r === nextRank ? "Next to draw" : "Not drawn yet"}</span>`}</div>
-    </div>`);
+    if (d) {
+      const isExcluded = excluded.has(d.number);
+      rows.push(`<div class="row" style="flex-wrap:wrap;">
+        <div><strong>${ordinal(r)} Prize</strong></div>
+        <div style="text-align:right;">
+          <div><strong>${esc(formatLuckyNumber(ev, d.number))}</strong> &mdash; ${esc(d.username)} <span class="muted" style="font-size:11px;">(Ticket ${d.ticket_slot || 1})</span></div>
+          <div style="margin-top:6px;">
+            <button class="btn small outline" data-action="redraw-prize" data-event="${ev.id}" data-rank="${r}">Re-draw</button>
+            <button class="btn small ${isExcluded ? "green" : "danger"}" style="margin-left:6px;" data-action="toggle-exclude-number" data-event="${ev.id}" data-number="${d.number}">${isExcluded ? "Re-include in future prizes" : "Remove from future prizes"}</button>
+          </div>
+          ${isExcluded ? `<div class="muted" style="font-size:11px;margin-top:4px;">Excluded from being drawn for any other prize.</div>` : ""}
+        </div>
+      </div>`);
+    } else {
+      rows.push(`<div class="row">
+        <div><strong>${ordinal(r)} Prize</strong></div>
+        <div><span class="muted">${r === nextRank ? "Next to draw" : "Not drawn yet"}</span></div>
+      </div>`);
+    }
   }
+
+  const excludedOnlyList = excludedNumbers.filter((n) => !drawnNumbers.has(n));
+  const excludedExtra = excludedOnlyList.length
+    ? `<div class="card">
+        <h3>Removed from future prizes</h3>
+        <p class="muted">These numbers won't be picked for any prize, but weren't themselves a prize winner (e.g. removed before winning, or their own winning draw was reset).</p>
+        ${excludedOnlyList.map((n) => `<div class="row"><div>${esc(formatLuckyNumber(ev, n))}</div><button class="btn small green" data-action="toggle-exclude-number" data-event="${ev.id}" data-number="${n}">Re-include</button></div>`).join("")}
+      </div>`
+    : "";
 
   return `
     ${topbar("Lucky Draw Simulator", ev.name, { back: "#/admin-dash?event=" + ev.id + "&tab=luckydraw" })}
     <div class="card">
-      <p class="muted">${entries.length} numbers issued &middot; ${remainingPool.length} remaining in the pool &middot; ${draws.length}/${totalPrizes} prizes drawn</p>
+      <p class="muted">${entries.length} numbers issued &middot; ${remainingPool.length} remaining in the pool &middot; ${draws.length}/${totalPrizes} prizes drawn${excludedNumbers.length ? ` &middot; ${excludedNumbers.length} excluded` : ""}</p>
       ${nextRank
         ? `<button class="btn full" data-action="draw-next-prize" data-event="${ev.id}" ${remainingPool.length === 0 ? "disabled" : ""}>Draw ${ordinal(nextRank)} Prize</button>`
         : `<p style="text-align:center;font-weight:700;">All prizes have been drawn! 🎉</p>`}
@@ -1469,8 +1658,10 @@ async function renderDrawSimulator(params) {
     </div>
     <div class="card">
       <h3>Results (${ordinal(totalPrizes)} Prize &rarr; 1st Prize)</h3>
+      <p class="muted">Re-draw picks a new winner for that prize if the current one can't be reached or doesn't claim it. Removing someone from future prizes stops their number being picked again for any prize not yet drawn (use it if a winner shouldn't also win a later prize).</p>
       ${rows.join("")}
     </div>
+    ${excludedExtra}
     ${footerNote()}
   `;
 }
@@ -1929,7 +2120,13 @@ async function renderAdminTriviaQuest(params) {
 /* ---------------- after-render hooks (QR canvas) ----------------
    The QR library (qrcode.min.js) is bundled directly into this page --
    no CDN fetch, so it can't be blocked by network/firewall/ad-blockers. */
-async function afterRender(path) {
+async function afterRender(path, params) {
+  if (path === "/event" && params && params.event) {
+    try {
+      const ev = await loadEvent(params.event);
+      maybeOfferTour(params.event, ev);
+    } catch (err) { /* the tour offer is a nice-to-have; never block the event page on it */ }
+  }
   if (path !== "/booth" && path !== "/redemption-qr") return;
   const wrap = document.querySelector(".qr-wrap[data-scanurl]");
   const canvas = document.getElementById("qrcanvas");
@@ -1943,6 +2140,144 @@ async function afterRender(path) {
   } else if (fallbackBox) {
     fallbackBox.innerHTML = "<p class='muted'>QR image unavailable right now &mdash; use Copy Link below instead.</p>";
   }
+}
+
+/* ---------------- interactive page tour ----------------
+   Offered once per (device, event) right after a participant lands on their
+   Event page, if that event has the Tutorial toggle on. Walks through
+   whichever of Booths / Passport / Lucky Draw / Social sections actually
+   render for this event (data-tour="..." on each card) -- an event with,
+   say, no Lucky Draw simply skips that step. Spotlights the real on-page
+   element (via a big box-shadow trick, no separate darkened backdrop image
+   needed) with a small callout box next to it. */
+const TOUR_STEP_DEFS = [
+  { key: "booths", titleKey: "tour_booths_title", textKey: "tour_booths_text" },
+  { key: "passport", titleKey: "tour_passport_title", textKey: "tour_passport_text" },
+  { key: "luckydraw", titleKey: "tour_luckydraw_title", textKey: "tour_luckydraw_text" },
+  { key: "social", titleKey: "tour_social_title", textKey: "tour_social_text" }
+];
+let _tourSteps = [];
+let _tourIndex = 0;
+
+function tourSeenKey(eventId) { return "carnivalTourSeen_" + eventId; }
+function hasTourBeenOffered(eventId) {
+  try { return localStorage.getItem(tourSeenKey(eventId)) === "1"; } catch (e) { return true; }
+}
+function markTourOffered(eventId) {
+  try { localStorage.setItem(tourSeenKey(eventId), "1"); } catch (e) { /* ignore */ }
+}
+function maybeOfferTour(eventId, ev) {
+  if (!ev || !ev.tutorialEnabled) return;
+  const sess = getSession();
+  if (!sess || sess.isAdmin || sess.eventId !== eventId) return;
+  if (hasTourBeenOffered(eventId)) return;
+  const available = TOUR_STEP_DEFS.filter((s) => document.querySelector(`[data-tour="${s.key}"]`));
+  if (!available.length) return;
+  markTourOffered(eventId);
+  showTourPopup(eventId);
+}
+function showTourPopup(eventId) {
+  if (document.getElementById("tourPopupOverlay")) return;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `<div class="tour-popup-overlay" id="tourPopupOverlay">
+    <div class="tour-popup-card">
+      <h3>${window.t("tour_popup_title")}</h3>
+      <p>${window.t("tour_popup_text")}</p>
+      <div class="tour-popup-actions">
+        <button class="btn outline" id="tourPopupSkip" type="button">${window.t("tour_btn_skip")}</button>
+        <button class="btn" id="tourPopupYes" type="button">${window.t("tour_btn_yes")}</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(wrap.firstElementChild);
+  const overlay = document.getElementById("tourPopupOverlay");
+  document.getElementById("tourPopupSkip").addEventListener("click", () => { overlay.remove(); });
+  document.getElementById("tourPopupYes").addEventListener("click", () => { overlay.remove(); startTour(eventId); });
+}
+function startTour(eventId) {
+  const popup = document.getElementById("tourPopupOverlay");
+  if (popup) popup.remove();
+  _tourSteps = TOUR_STEP_DEFS.filter((s) => document.querySelector(`[data-tour="${s.key}"]`));
+  _tourIndex = 0;
+  if (!_tourSteps.length) return;
+  ensureTourBlocker();
+  renderTourStep();
+}
+function ensureTourBlocker() {
+  if (document.getElementById("tourBlocker")) return;
+  const blocker = document.createElement("div");
+  blocker.id = "tourBlocker";
+  blocker.className = "tour-blocker";
+  document.body.appendChild(blocker);
+}
+function endTour() {
+  const target = document.querySelector(".tour-target");
+  if (target) target.classList.remove("tour-target");
+  const blocker = document.getElementById("tourBlocker");
+  if (blocker) blocker.remove();
+  const tooltip = document.getElementById("tourTooltip");
+  if (tooltip) tooltip.remove();
+  _tourSteps = [];
+  _tourIndex = 0;
+}
+function nextTourStep() {
+  if (_tourIndex >= _tourSteps.length - 1) { endTour(); return; }
+  _tourIndex++;
+  renderTourStep();
+}
+function renderTourStep() {
+  const prevTarget = document.querySelector(".tour-target");
+  if (prevTarget) prevTarget.classList.remove("tour-target");
+  const prevTooltip = document.getElementById("tourTooltip");
+  if (prevTooltip) prevTooltip.remove();
+
+  const step = _tourSteps[_tourIndex];
+  const el = document.querySelector(`[data-tour="${step.key}"]`);
+  if (!el) { nextTourStep(); return; }
+  el.classList.add("tour-target");
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  const box = document.createElement("div");
+  box.id = "tourTooltip";
+  box.className = "tour-tooltip";
+  box.innerHTML = `
+    <div class="tour-step-indicator">${window.t("tour_step_of", { n: _tourIndex + 1, total: _tourSteps.length })}</div>
+    <h4>${window.t(step.titleKey)}</h4>
+    <p>${window.t(step.textKey)}</p>
+    <div class="tour-actions">
+      <button class="btn small outline" id="tourSkipBtn" type="button">${window.t("tour_btn_skip")}</button>
+      <div>
+        ${_tourIndex > 0 ? `<button class="btn small secondary" id="tourPrevBtn" type="button" style="margin-right:6px;">${window.t("tour_btn_prev")}</button>` : ""}
+        <button class="btn small" id="tourNextBtn" type="button">${_tourIndex === _tourSteps.length - 1 ? window.t("tour_btn_done") : window.t("tour_btn_next")}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(box);
+  setTimeout(() => positionTourTooltip(el, box), 260); // wait for the scroll to settle
+  document.getElementById("tourSkipBtn").addEventListener("click", endTour);
+  const prevBtn = document.getElementById("tourPrevBtn");
+  if (prevBtn) prevBtn.addEventListener("click", () => { _tourIndex--; renderTourStep(); });
+  document.getElementById("tourNextBtn").addEventListener("click", nextTourStep);
+}
+function positionTourTooltip(el, box) {
+  if (!document.body.contains(el) || !document.body.contains(box)) return;
+  const rect = el.getBoundingClientRect();
+  const boxHeight = box.offsetHeight || 160;
+  const boxWidth = box.offsetWidth || 300;
+  const margin = 12;
+  let top;
+  if (rect.bottom + margin + boxHeight < window.innerHeight) {
+    top = rect.bottom + margin;
+  } else if (rect.top - margin - boxHeight > 0) {
+    top = rect.top - margin - boxHeight;
+  } else {
+    top = Math.max(margin, (window.innerHeight - boxHeight) / 2);
+  }
+  let left = rect.left;
+  if (left + boxWidth > window.innerWidth - margin) left = window.innerWidth - boxWidth - margin;
+  if (left < margin) left = margin;
+  box.style.top = top + "px";
+  box.style.left = left + "px";
 }
 
 /* ---------------- in-app camera QR scanner (for redeeming coupons) ----------------
@@ -2190,6 +2525,21 @@ document.addEventListener("click", async function (e) {
     return;
   }
   if (action === "manual-refresh") { await render(); return; }
+  if (action === "rate-app") {
+    const eventId = t.dataset.event;
+    const value = parseInt(t.dataset.value, 10);
+    const sess = getSession();
+    if (!sess || sess.isAdmin) return;
+    const pstate = await loadProgress(eventId, sess.username, sess.ticketSlot);
+    pstate.appRating = value;
+    await saveProgress(eventId, sess.username, sess.ticketSlot, pstate);
+    await render();
+    return;
+  }
+  if (action === "start-tour") {
+    startTour(t.dataset.event);
+    return;
+  }
   if (action === "scroll-to") {
     e.preventDefault();
     const el = document.getElementById(t.dataset.target);
@@ -2267,20 +2617,58 @@ document.addEventListener("click", async function (e) {
     const entries = await loadLuckyDrawEntries(eventId);
     const draws = await loadDraws(eventId);
     const totalPrizes = (ev.luckyDraw && ev.luckyDraw.numberOfPrizes) || 15;
+    const excluded = new Set((ev.luckyDraw && ev.luckyDraw.excludedNumbers) || []);
     const drawnRanks = new Set(draws.map((d) => d.prize_rank));
     const drawnNumbers = new Set(draws.map((d) => d.number));
     let nextRank = null;
     for (let r = totalPrizes; r >= 1; r--) { if (!drawnRanks.has(r)) { nextRank = r; break; } }
-    const pool = entries.filter((e) => !drawnNumbers.has(e.number));
+    const pool = entries.filter((e) => !drawnNumbers.has(e.number) && !excluded.has(e.number));
     if (nextRank == null || pool.length === 0) { await render(); return; }
     const winner = pool[Math.floor(Math.random() * pool.length)];
     await insertDraw(eventId, nextRank, winner.number, winner.username, winner.ticketSlot);
     await render();
     return;
   }
+  if (action === "redraw-prize") {
+    const eventId = t.dataset.event;
+    const rank = parseInt(t.dataset.rank, 10);
+    if (!confirm(`Pick a new ${ordinal(rank)} Prize winner? The current winner will no longer hold this prize (they stay eligible for other not-yet-drawn prizes unless you also remove them).`)) return;
+    t.disabled = true;
+    const ev = await loadEvent(eventId);
+    const draws = await loadDraws(eventId);
+    const current = draws.find((d) => d.prize_rank === rank);
+    await deleteDraw(eventId, rank);
+    const entries = await loadLuckyDrawEntries(eventId);
+    const remainingDraws = draws.filter((d) => d.prize_rank !== rank);
+    const excluded = new Set((ev.luckyDraw && ev.luckyDraw.excludedNumbers) || []);
+    const drawnNumbers = new Set(remainingDraws.map((d) => d.number));
+    const pool = entries.filter((e) => !drawnNumbers.has(e.number) && !excluded.has(e.number) && (!current || e.number !== current.number));
+    if (pool.length === 0) {
+      alert("No one else is available to redraw this prize -- it's now marked as not drawn.");
+      await render();
+      return;
+    }
+    const winner = pool[Math.floor(Math.random() * pool.length)];
+    await insertDraw(eventId, rank, winner.number, winner.username, winner.ticketSlot);
+    await render();
+    return;
+  }
+  if (action === "toggle-exclude-number") {
+    const eventId = t.dataset.event;
+    const number = parseInt(t.dataset.number, 10);
+    await updateEvent(eventId, (ev) => {
+      if (!ev.luckyDraw.excludedNumbers) ev.luckyDraw.excludedNumbers = [];
+      const idx = ev.luckyDraw.excludedNumbers.indexOf(number);
+      if (idx === -1) ev.luckyDraw.excludedNumbers.push(number);
+      else ev.luckyDraw.excludedNumbers.splice(idx, 1);
+    });
+    await render();
+    return;
+  }
   if (action === "reset-draw") {
-    if (!confirm("Clear all drawn results for this event? This cannot be undone.")) return;
+    if (!confirm("Clear all drawn results for this event? This also clears the \"removed from future prizes\" list. This cannot be undone.")) return;
     await deleteAllDraws(t.dataset.event);
+    await updateEvent(t.dataset.event, (ev) => { ev.luckyDraw.excludedNumbers = []; });
     await render();
     return;
   }
@@ -2304,7 +2692,7 @@ document.addEventListener("click", async function (e) {
       id, name: "New Event", description: "", startTime: "", endTime: "",
       codeEnabled: false, code: "",
       booths: [], passport: { tasks: [], redemptions: [] },
-      luckyDraw: { enabled: false, terms: "", prefix: "", padDigits: 4, stopped: false, numberOfPrizes: 15 },
+      luckyDraw: { enabled: false, terms: "", prefix: "", padDigits: 4, stopped: false, numberOfPrizes: 15, excludedNumbers: [] },
       feedback: { questions: [], ackMessage: "Thank you for your feedback!" },
       socialLinks: [
         { id: sid(), label: "Friends of Brickland-Tengah Facebook Page", url: "https://www.facebook.com/ilovebricklandtengah/" },
