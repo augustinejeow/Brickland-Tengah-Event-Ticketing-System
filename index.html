@@ -488,8 +488,8 @@ const TRANSLATIONS = {
     err_invalid_link: "This link is no longer valid.",
     err_server: "Something went wrong. Please try again.",
     err_not_started: "This event hasn't started yet.", err_ended: "This event has ended.",
-    share_title: "Share access", share_hint: "Your ticket covers {n} sign-in(s). Share this link so others on your ticket can join without an OTP.",
-    share_status: "{used} of {total} tickets in use", btn_copy_link: "Copy link", link_copied: "Copied!", link_copy_manual: "Copy this link:",
+    share_title: "Share this ticket", share_hint: "Send this link (e.g. via WhatsApp) to share your ticket. Anyone who opens it gets straight in, no code needed, and sees the same redemption status as you -- if one of you redeems something, it shows as redeemed for everyone.",
+    btn_copy_link: "Copy link", link_copied: "Copied!", link_copy_manual: "Copy this link:",
     claim_working: "Signing you in…", claim_error_title: "Couldn't sign you in",
     err_invalid_login: "Invalid username or password. Use test_user1-10 and P@ssw0rd.", err_event_not_found: "Event not found.",
     err_incorrect_code: "Incorrect event code.", err_task_not_found: "Task not found.", err_item_not_found: "Item not found.",
@@ -579,8 +579,8 @@ const TRANSLATIONS = {
     err_invalid_link: "此链接已失效。",
     err_server: "出现错误，请重试。",
     err_not_started: "此活动尚未开始。", err_ended: "此活动已结束。",
-    share_title: "分享登录权限", share_hint: "您的票券可供 {n} 次登录使用。分享此链接，让票券内的其他人无需验证码即可加入。",
-    share_status: "已使用 {used} / {total} 个名额", btn_copy_link: "复制链接", link_copied: "已复制！", link_copy_manual: "请复制此链接：",
+    share_title: "分享此票券", share_hint: "通过 WhatsApp 等方式分享此链接。任何打开此链接的人都可以直接进入，无需验证码，并且会看到与您相同的兑换状态——只要有人兑换了某项目，其他人也会看到该项目已兑换。",
+    btn_copy_link: "复制链接", link_copied: "已复制！", link_copy_manual: "请复制此链接：",
     claim_working: "正在为您登录……", claim_error_title: "无法为您登录",
     err_invalid_login: "用户名或密码错误。请使用 test_user1-10 及密码 P@ssw0rd。", err_event_not_found: "未找到该活动。",
     err_incorrect_code: "活动代码错误。", err_task_not_found: "未找到该任务。", err_item_not_found: "未找到该项目。",
@@ -670,8 +670,8 @@ const TRANSLATIONS = {
     err_invalid_link: "Pautan ini tidak lagi sah.",
     err_server: "Sesuatu tidak kena. Sila cuba lagi.",
     err_not_started: "Acara ini belum bermula.", err_ended: "Acara ini telah berakhir.",
-    share_title: "Kongsi akses", share_hint: "Tiket anda meliputi {n} log masuk. Kongsi pautan ini supaya orang lain pada tiket anda boleh menyertai tanpa OTP.",
-    share_status: "{used} daripada {total} tiket digunakan", btn_copy_link: "Salin pautan", link_copied: "Disalin!", link_copy_manual: "Salin pautan ini:",
+    share_title: "Kongsi tiket ini", share_hint: "Hantar pautan ini (cth. melalui WhatsApp) untuk kongsi tiket anda. Sesiapa yang membukanya terus log masuk, tiada kod diperlukan, dan melihat status penebusan yang sama seperti anda -- jika salah seorang menebus sesuatu, ia dipaparkan sebagai ditebus untuk semua.",
+    btn_copy_link: "Salin pautan", link_copied: "Disalin!", link_copy_manual: "Salin pautan ini:",
     claim_working: "Sedang log masuk anda…", claim_error_title: "Tidak dapat log masuk anda",
     err_invalid_login: "Nama pengguna atau kata laluan tidak sah. Gunakan test_user1-10 dan P@ssw0rd.", err_event_not_found: "Acara tidak dijumpai.",
     err_incorrect_code: "Kod acara tidak betul.", err_task_not_found: "Tugasan tidak dijumpai.", err_item_not_found: "Item tidak dijumpai.",
@@ -1083,20 +1083,14 @@ async function renderEvent(params) {
   let shareCard = "";
   if (!sess.isAdmin) {
     try {
-      const { data: statusRows } = await sb.rpc("my_ticket_status", { p_event_id: ev.id });
-      const status = Array.isArray(statusRows) ? statusRows[0] : statusRows;
-      const ticketCount = status?.ticket_count || 1;
-      if (ticketCount > 1) {
-        const { data: token } = await sb.rpc("get_or_create_share_link", { p_event_id: ev.id });
-        if (token) {
-          const link = `${location.origin}${location.pathname}#/claim?token=${encodeURIComponent(token)}`;
-          shareCard = `<div class="card">
-            <h3>${t("share_title")}</h3>
-            <p class="muted">${t("share_hint", { n: ticketCount })}</p>
-            <p class="muted">${t("share_status", { used: status.active_count, total: ticketCount })}</p>
-            <button class="btn secondary full" data-action="copy-share-link" data-link="${esc(link)}">${t("btn_copy_link")}</button>
-          </div>`;
-        }
+      const { data: token } = await sb.rpc("get_or_create_share_link", { p_event_id: ev.id });
+      if (token) {
+        const link = `${location.origin}${location.pathname}#/claim?token=${encodeURIComponent(token)}`;
+        shareCard = `<div class="card">
+          <h3>${t("share_title")}</h3>
+          <p class="muted">${t("share_hint")}</p>
+          <button class="btn secondary full" data-action="copy-share-link" data-link="${esc(link)}">${t("btn_copy_link")}</button>
+        </div>`;
       }
     } catch (err) { /* sharing is a nice-to-have; never block the event page on it */ }
   }
