@@ -210,8 +210,15 @@ async function updateEvent(eventId, fn) {
   fn(ev);
   await saveEvent(ev);
 }
-async function loadProgress(eventId, username) {
-  const { data, error } = await sb.from("participant_progress").select("*").eq("event_id", eventId).eq("username", username).maybeSingle();
+/* Each duplicate email in the whitelist is a separate, independent ticket --
+   its own lucky draw number, its own booth/passport/trivia redemption
+   allowance -- not a shared pool. So progress is keyed by (event, username,
+   ticketSlot), not just (event, username). ticketSlot defaults to 1 so
+   older/legacy calls (and single-ticket participants) keep working exactly
+   as before against "their one ticket". */
+async function loadProgress(eventId, username, ticketSlot) {
+  const slot = ticketSlot || 1;
+  const { data, error } = await sb.from("participant_progress").select("*").eq("event_id", eventId).eq("username", username).eq("ticket_slot", slot).maybeSingle();
   if (error) { console.error("loadProgress", error); return defaultProgress(); }
   if (!data) return defaultProgress();
   return {
@@ -225,10 +232,12 @@ async function loadProgress(eventId, username) {
     triviaRedeemed: data.trivia_redeemed || {}
   };
 }
-async function saveProgress(eventId, username, pstate) {
+async function saveProgress(eventId, username, ticketSlot, pstate) {
+  const slot = ticketSlot || 1;
   const row = {
     event_id: eventId,
     username: username,
+    ticket_slot: slot,
     booth_redeemed: pstate.boothRedeemed || {},
     tasks_done: pstate.tasksDone || {},
     passport_redeemed: pstate.passportRedeemed || {},
@@ -239,7 +248,7 @@ async function saveProgress(eventId, username, pstate) {
     trivia_redeemed: pstate.triviaRedeemed || {},
     updated_at: new Date().toISOString()
   };
-  const { error } = await sb.from("participant_progress").upsert(row, { onConflict: "event_id,username" });
+  const { error } = await sb.from("participant_progress").upsert(row, { onConflict: "event_id,username,ticket_slot" });
   if (error) console.error("saveProgress", error);
 }
 async function loadLuckyDrawEntries(eventId) {
@@ -247,7 +256,7 @@ async function loadLuckyDrawEntries(eventId) {
   if (error) { console.error("loadLuckyDrawEntries", error); return []; }
   return (data || [])
     .filter((r) => r.lucky_draw_number != null)
-    .map((r) => ({ username: r.username, number: r.lucky_draw_number }))
+    .map((r) => ({ username: r.username, ticketSlot: r.ticket_slot || 1, number: r.lucky_draw_number }))
     .sort((a, b) => a.number - b.number);
 }
 async function assignLuckyDrawNumber(eventId) {
@@ -265,8 +274,8 @@ async function loadDraws(eventId) {
   if (error) { console.error("loadDraws", error); return []; }
   return data || [];
 }
-async function insertDraw(eventId, prizeRank, number, username) {
-  const { error } = await sb.from("lucky_draw_draws").insert({ event_id: eventId, prize_rank: prizeRank, number, username });
+async function insertDraw(eventId, prizeRank, number, username, ticketSlot) {
+  const { error } = await sb.from("lucky_draw_draws").insert({ event_id: eventId, prize_rank: prizeRank, number, username, ticket_slot: ticketSlot || 1 });
   if (error) console.error("insertDraw", error);
 }
 async function deleteAllDraws(eventId) {
@@ -300,10 +309,10 @@ function downloadTextFile(filename, mime, content) {
 function buildFeedbackCSV(ev, rows) {
   const submitted = rows.filter((r) => r.feedback_submitted);
   const questions = ev.feedback.questions || [];
-  let csv = csvRow(["Username", ...questions.map((q) => q.text)]);
+  let csv = csvRow(["Username", "Ticket", ...questions.map((q) => q.text)]);
   submitted.forEach((r) => {
     const answers = r.feedback_answers || {};
-    const cells = [r.username, ...questions.map((q) => {
+    const cells = [r.username, r.ticket_slot || 1, ...questions.map((q) => {
       const v = answers["q_" + q.id];
       if (Array.isArray(v)) return v.join("; ");
       return v || "";
@@ -989,9 +998,9 @@ async function renderClaimLink(params) {
   if (verifyErr) {
     return `<div class="card"><h3>${t("claim_error_title")}</h3><p class="muted">${t("err_server")}</p><a class="btn" href="#/">Home</a></div>`;
   }
-  setSession({ eventId: data.eventId, username: data.email, isAdmin: false, sessionId: data.sessionId });
-  const touched = await loadProgress(data.eventId, data.email);
-  await saveProgress(data.eventId, data.email, touched);
+  setSession({ eventId: data.eventId, username: data.email, isAdmin: false, sessionId: data.sessionId, ticketSlot: data.ticketSlot });
+  const touched = await loadProgress(data.eventId, data.email, data.ticketSlot);
+  await saveProgress(data.eventId, data.email, data.ticketSlot, touched);
   setTimeout(() => { nav("/event", { event: data.eventId }); render(); }, 0);
   return `<div class="card">${t("claim_working")}</div>`;
 }
@@ -1005,7 +1014,7 @@ async function renderEvent(params) {
     setTimeout(() => nav("/signin", { event: ev.id }), 0);
     return `<div class="card">Redirecting to sign in&hellip;</div>`;
   }
-  const pstate = await loadProgress(ev.id, sess.username);
+  const pstate = await loadProgress(ev.id, sess.username, sess.ticketSlot);
 
   const hasCompulsory = ev.passport.tasks.some((t) => t.compulsory);
   const compulsoryDone = ev.passport.tasks.filter((t) => t.compulsory).every((t) => pstate.tasksDone[t.id]);
@@ -1083,7 +1092,7 @@ async function renderEvent(params) {
   let shareCard = "";
   if (!sess.isAdmin) {
     try {
-      const { data: token } = await sb.rpc("get_or_create_share_link", { p_event_id: ev.id });
+      const { data: token } = await sb.rpc("get_or_create_share_link", { p_event_id: ev.id, p_ticket_slot: sess.ticketSlot || 1 });
       if (token) {
         const link = `${location.origin}${location.pathname}#/claim?token=${encodeURIComponent(token)}`;
         shareCard = `<div class="card">
@@ -1137,7 +1146,7 @@ async function renderPassport(params) {
   if (!ev) return `<div class="card">Event not found. <a href="#/">Home</a></div>`;
   const sess = requireSession(ev.id);
   if (!sess) return `<div class="card">Redirecting to sign in&hellip;</div>`;
-  const pstate = await loadProgress(ev.id, sess.username);
+  const pstate = await loadProgress(ev.id, sess.username, sess.ticketSlot);
 
   const hasCompulsory = ev.passport.tasks.some((t) => t.compulsory);
   const compulsoryDone = ev.passport.tasks.filter((t) => t.compulsory).every((t) => pstate.tasksDone[t.id]);
@@ -1181,7 +1190,7 @@ async function renderTriviaPlayground(params) {
   const sess = requireSession(ev.id);
   if (!sess) return `<div class="card">Redirecting to sign in&hellip;</div>`;
   if (!ev.trivia || !ev.trivia.enabled) return `<div class="card">${t("trivia_disabled")} <a href="#/event?event=${ev.id}">${t("back_to_event")}</a></div>`;
-  const pstate = await loadProgress(ev.id, sess.username);
+  const pstate = await loadProgress(ev.id, sess.username, sess.ticketSlot);
 
   const hasCompulsory = ev.trivia.quests.some((q) => q.compulsory);
   const compulsoryDone = ev.trivia.quests.filter((q) => q.compulsory).every((q) => pstate.triviaDone[q.id]);
@@ -1225,7 +1234,7 @@ async function renderTriviaQuest(params) {
   if (!sess) return `<div class="card">Redirecting to sign in&hellip;</div>`;
   const quest = (ev.trivia.quests || []).find((q) => q.id === params.quest);
   if (!quest) return `<div class="card">Quest not found. <a href="#/trivia?event=${ev.id}">Back</a></div>`;
-  const pstate = await loadProgress(ev.id, sess.username);
+  const pstate = await loadProgress(ev.id, sess.username, sess.ticketSlot);
   const done = !!pstate.triviaDone[quest.id];
 
   const qaHtml = (quest.questions || []).map((q, i) => {
@@ -1287,16 +1296,16 @@ async function renderBoothQR(params) {
 /* Shared task-completion logic -- used by BOTH the direct-link scan route
    below (native camera app opening the QR's link) AND the in-app camera
    scanner modal, so both paths can never disagree. */
-async function attemptTaskCompletion(eventId, username, taskId) {
+async function attemptTaskCompletion(eventId, username, ticketSlot, taskId) {
   const ev = await loadEvent(eventId);
   if (!ev) return { ok: false, message: t("err_event_not_found") };
   const task = ev.passport.tasks.find((tk) => tk.id === taskId);
   if (!task) return { ok: false, message: t("err_task_not_found") };
-  const pstate = await loadProgress(eventId, username);
+  const pstate = await loadProgress(eventId, username, ticketSlot);
   const alreadyDone = !!pstate.tasksDone[taskId];
   if (!alreadyDone) {
     pstate.tasksDone[taskId] = true;
-    await saveProgress(eventId, username, pstate);
+    await saveProgress(eventId, username, ticketSlot, pstate);
   }
   return { ok: true, task, alreadyDone };
 }
@@ -1312,7 +1321,7 @@ async function renderScan(params) {
     setTimeout(() => nav("/signin", { event: ev.id }), 0);
     return `<div class="card">Please sign in first to record this task. Redirecting&hellip;</div>`;
   }
-  await attemptTaskCompletion(ev.id, sess.username, task.id);
+  await attemptTaskCompletion(ev.id, sess.username, sess.ticketSlot, task.id);
   return `
     ${topbar("Task Complete!", ev.name)}
     <div class="card" style="text-align:center;">
@@ -1372,13 +1381,13 @@ async function renderRedemptionQR(params) {
    (kept for backward compatibility with a native phone camera app opening
    the QR's link directly) AND the in-app camera scanner modal, so both
    paths can never disagree about what counts as a valid redemption. */
-async function attemptRedemption(eventId, username, kind, itemId) {
+async function attemptRedemption(eventId, username, ticketSlot, kind, itemId) {
   const ev = await loadEvent(eventId);
   if (!ev) return { ok: false, message: t("err_event_not_found") };
   const list = redemptionListFor(ev, kind);
   const item = (list || []).find((x) => x.id === itemId);
   if (!item) return { ok: false, message: t("err_item_not_found") };
-  const pstate = await loadProgress(eventId, username);
+  const pstate = await loadProgress(eventId, username, ticketSlot);
   const key = redemptionKeyFor(kind);
   const used = pstate[key][item.id] || 0;
   let canRedeem = true;
@@ -1386,7 +1395,7 @@ async function attemptRedemption(eventId, username, kind, itemId) {
   else if (item.rule === "controlled") canRedeem = used < item.limit;
   if (canRedeem) {
     pstate[key][item.id] = used + 1;
-    await saveProgress(eventId, username, pstate);
+    await saveProgress(eventId, username, ticketSlot, pstate);
     return { ok: true, redeemed: true, item };
   }
   return { ok: true, redeemed: false, item, message: t("already_reached_limit") };
@@ -1404,7 +1413,7 @@ async function renderRedemptionScan(params) {
     setTimeout(() => nav("/signin", { event: ev.id }), 0);
     return `<div class="card">Please sign in first to redeem this. Redirecting&hellip;</div>`;
   }
-  const result = await attemptRedemption(ev.id, sess.username, kind, item.id);
+  const result = await attemptRedemption(ev.id, sess.username, sess.ticketSlot, kind, item.id);
   const canRedeem = !!result.redeemed;
   return `
     ${topbar(canRedeem ? "Redeemed!" : "Already Redeemed", ev.name)}
@@ -1437,7 +1446,7 @@ async function renderDrawSimulator(params) {
     const d = draws.find((x) => x.prize_rank === r);
     rows.push(`<div class="row">
       <div><strong>${ordinal(r)} Prize</strong></div>
-      <div>${d ? `<strong>${esc(formatLuckyNumber(ev, d.number))}</strong> &mdash; ${esc(d.username)}` : `<span class="muted">${r === nextRank ? "Next to draw" : "Not drawn yet"}</span>`}</div>
+      <div>${d ? `<strong>${esc(formatLuckyNumber(ev, d.number))}</strong> &mdash; ${esc(d.username)} <span class="muted" style="font-size:11px;">(Ticket ${d.ticket_slot || 1})</span>` : `<span class="muted">${r === nextRank ? "Next to draw" : "Not drawn yet"}</span>`}</div>
     </div>`);
   }
 
@@ -1465,7 +1474,7 @@ async function renderFeedback(params) {
   if (!ev) return `<div class="card">Event not found. <a href="#/">Home</a></div>`;
   const sess = requireSession(ev.id);
   if (!sess) return `<div class="card">Redirecting to sign in&hellip;</div>`;
-  const pstate = await loadProgress(ev.id, sess.username);
+  const pstate = await loadProgress(ev.id, sess.username, sess.ticketSlot);
 
   if (pstate.feedbackSubmitted) {
     return `${topbar(t("feedback_title"), ev.name, { back: "#/event?event=" + ev.id })}
@@ -2067,7 +2076,7 @@ async function handleScanText(text) {
     if (status) { status.textContent = t("scanner_checking"); status.className = "scanner-status"; }
     const sess = getSession();
     if (!sess) { if (status) { status.textContent = t("scanner_not_signed_in"); status.className = "scanner-status error"; } return; }
-    const result = await attemptTaskCompletion(_scannerExpected.eventId, sess.username, _scannerExpected.itemId);
+    const result = await attemptTaskCompletion(_scannerExpected.eventId, sess.username, sess.ticketSlot, _scannerExpected.itemId);
     if (!status) return;
     if (!result.ok) {
       status.textContent = result.message || t("something_wrong");
@@ -2095,7 +2104,7 @@ async function handleScanText(text) {
   if (status) { status.textContent = t("scanner_checking"); status.className = "scanner-status"; }
   const sess = getSession();
   if (!sess) { if (status) { status.textContent = t("scanner_not_signed_in"); status.className = "scanner-status error"; } return; }
-  const result = await attemptRedemption(_scannerExpected.eventId, sess.username, _scannerExpected.kind, _scannerExpected.itemId);
+  const result = await attemptRedemption(_scannerExpected.eventId, sess.username, sess.ticketSlot, _scannerExpected.kind, _scannerExpected.itemId);
   if (!status) return;
   if (!result.ok) {
     status.textContent = result.message || t("something_wrong");
@@ -2207,9 +2216,9 @@ document.addEventListener("click", async function (e) {
     const sess = getSession();
     if (!sess) return;
     t.disabled = true;
-    const pstate = await loadProgress(eventId, sess.username);
+    const pstate = await loadProgress(eventId, sess.username, sess.ticketSlot);
     pstate.triviaDone[questId] = true;
-    await saveProgress(eventId, sess.username, pstate);
+    await saveProgress(eventId, sess.username, sess.ticketSlot, pstate);
     await render();
     return;
   }
@@ -2226,12 +2235,12 @@ document.addEventListener("click", async function (e) {
       await render();
       return;
     }
-    const pstate = await loadProgress(eventId, sess.username);
+    const pstate = await loadProgress(eventId, sess.username, sess.ticketSlot);
     if (pstate.luckyDrawNumber == null) {
       const num = await assignLuckyDrawNumber(eventId);
       if (num != null) {
         pstate.luckyDrawNumber = num;
-        await saveProgress(eventId, sess.username, pstate);
+        await saveProgress(eventId, sess.username, sess.ticketSlot, pstate);
       } else {
         alert("Could not get a lucky draw number right now. Please try again.");
       }
@@ -2258,7 +2267,7 @@ document.addEventListener("click", async function (e) {
     const pool = entries.filter((e) => !drawnNumbers.has(e.number));
     if (nextRank == null || pool.length === 0) { await render(); return; }
     const winner = pool[Math.floor(Math.random() * pool.length)];
-    await insertDraw(eventId, nextRank, winner.number, winner.username);
+    await insertDraw(eventId, nextRank, winner.number, winner.username, winner.ticketSlot);
     await render();
     return;
   }
@@ -2382,10 +2391,10 @@ document.addEventListener("submit", async function (e) {
       }
       const { error: verifyErr } = await sb.auth.verifyOtp({ token_hash: data.tokenHash, type: "email" });
       if (verifyErr) { if (errorBox) errorBox.textContent = t("err_server"); return; }
-      setSession({ eventId, username: email, isAdmin: false, sessionId: data.sessionId });
+      setSession({ eventId, username: email, isAdmin: false, sessionId: data.sessionId, ticketSlot: data.ticketSlot });
       // "touch" a progress row so the admin dashboard can count this as a logged-in participant
-      const touched = await loadProgress(eventId, email);
-      await saveProgress(eventId, email, touched);
+      const touched = await loadProgress(eventId, email, data.ticketSlot);
+      await saveProgress(eventId, email, data.ticketSlot, touched);
       nav("/event", { event: eventId });
       await render();
       return;
@@ -2413,10 +2422,10 @@ document.addEventListener("submit", async function (e) {
         seen.add(el.name);
         answers[el.name] = el.type === "checkbox" ? fd.getAll(el.name) : (fd.get(el.name) || "");
       }
-      const pstate = await loadProgress(eventId, sess.username);
+      const pstate = await loadProgress(eventId, sess.username, sess.ticketSlot);
       pstate.feedbackSubmitted = true;
       pstate.feedbackAnswers = answers;
-      await saveProgress(eventId, sess.username, pstate);
+      await saveProgress(eventId, sess.username, sess.ticketSlot, pstate);
       nav("/feedback-done", { event: eventId });
       await render();
       return;
