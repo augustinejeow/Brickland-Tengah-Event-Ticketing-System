@@ -109,31 +109,20 @@
 const SUPABASE_URL = 'https://kcskmornrspsqgbpglhr.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_vbJTYvpZGN3iO14-uakUdQ_HPr5RVDM';
 
-/* Sessions are scoped per browser TAB (see the tabId() note further down),
-   so the Supabase Auth session itself must also be tab-scoped -- otherwise
-   supabase-js's default localStorage key would be shared across every tab
-   on this origin, and signing in as a second person in a new tab would
-   silently sign the first tab's person out too. This tiny helper duplicates
-   just enough of tabId()'s logic (defined properly below) to run before the
-   client is created; both read/write the same sessionStorage key so they
-   always agree. */
-function _earlyTabId() {
-  let id;
-  try { id = sessionStorage.getItem("carnivalTabId"); } catch (e) { id = null; }
-  if (!id) {
-    id = Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 9);
-    try { sessionStorage.setItem("carnivalTabId", id); } catch (e) { /* ignore */ }
-  }
-  return id;
-}
-const _tabScopedAuthStorage = {
-  getItem: (key) => { try { return localStorage.getItem("tabauth_" + _earlyTabId() + "_" + key); } catch (e) { return null; } },
-  setItem: (key, value) => { try { localStorage.setItem("tabauth_" + _earlyTabId() + "_" + key, value); } catch (e) { /* ignore */ } },
-  removeItem: (key) => { try { localStorage.removeItem("tabauth_" + _earlyTabId() + "_" + key); } catch (e) { /* ignore */ } },
+/* A signed-in participant must stay signed in for the whole event -- closing
+   the tab/browser, restarting their phone, reopening the link the next day,
+   etc. must never sign them out. So the Supabase Auth session lives under a
+   single fixed localStorage key (plain persistent storage, no per-tab
+   scoping) and survives exactly as long as localStorage does on that device,
+   which for a real participant is effectively "until the event is over". */
+const _persistentAuthStorage = {
+  getItem: (key) => { try { return localStorage.getItem("cvauth_" + key); } catch (e) { return null; } },
+  setItem: (key, value) => { try { localStorage.setItem("cvauth_" + key, value); } catch (e) { /* ignore */ } },
+  removeItem: (key) => { try { localStorage.removeItem("cvauth_" + key); } catch (e) { /* ignore */ } },
 };
 
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: _tabScopedAuthStorage }
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, storage: _persistentAuthStorage }
 });
 
 /* ---------------- row <-> object adapters ---------------- */
@@ -455,25 +444,12 @@ function fmtDate(iso) {
   return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/* ---------------- session (still local only; sign-in stays simulated) ----------------
-   Sessions are scoped per BROWSER TAB, not per browser: sessionStorage is unique to each
-   tab (and stays stable across reloads of that same tab, but a brand-new tab gets a fresh
-   one), so we use it to mint a stable per-tab id, then store the actual session under a
-   localStorage key namespaced by that id. This lets someone open two tabs of the same
-   browser and be signed in as two different accounts (or as admin in one, a participant
-   in another) at the same time, without one login kicking the other one out. Because the
-   session itself lives in localStorage, it survives reloads/relaunches of that tab and
-   stays signed in until an explicit sign-out -- a brand-new tab just needs a fresh sign-in. */
-function tabId() {
-  let id;
-  try { id = sessionStorage.getItem("carnivalTabId"); } catch (e) { id = null; }
-  if (!id) {
-    id = uid() + uid();
-    try { sessionStorage.setItem("carnivalTabId", id); } catch (e) { /* ignore */ }
-  }
-  return id;
-}
-function sessionKey() { return "carnivalSession_" + tabId(); }
+/* ---------------- session ----------------
+   Stored under one fixed localStorage key -- not scoped per tab or per visit --
+   so it survives closing the tab, closing the whole browser, and reopening the
+   link on a later day of the event. A device stays signed in for as long as the
+   event runs (there's no user-facing sign-out for participants any more). */
+function sessionKey() { return "carnivalSession"; }
 function getSession() { try { return JSON.parse(localStorage.getItem(sessionKey())); } catch (e) { return null; } }
 function setSession(s) { localStorage.setItem(sessionKey(), JSON.stringify(s)); }
 function clearSession() { localStorage.removeItem(sessionKey()); }
@@ -502,7 +478,7 @@ const TRANSLATIONS = {
     link_resend_otp: "Resend code", link_change_email: "Use a different email",
     signin_valid_accounts: "Valid test accounts:", signin_password_label: "Password:",
     err_not_eligible: "This email isn't on the guest list for this event. Check with the event organiser.",
-    err_capacity_full: "All tickets for this email are already signed in on other devices.",
+    err_capacity_full: "Your ticket has been successfully redeemed.",
     err_no_pending_code: "No code is pending for this email. Request a new one.",
     err_expired: "That code has expired. Request a new one.",
     err_incorrect_code_otp: "Incorrect code. {n} attempt(s) remaining.",
@@ -593,7 +569,7 @@ const TRANSLATIONS = {
     link_resend_otp: "重新发送验证码", link_change_email: "使用其他电子邮件",
     signin_valid_accounts: "可用的测试账号：", signin_password_label: "密码：",
     err_not_eligible: "此电子邮件不在本活动的宾客名单中，请联系主办方。",
-    err_capacity_full: "此电子邮件的所有票券名额已在其他设备上登录。",
+    err_capacity_full: "您的票券已成功兑换。",
     err_no_pending_code: "此电子邮件没有待验证的验证码，请重新请求。",
     err_expired: "验证码已过期，请重新请求。",
     err_incorrect_code_otp: "验证码错误，还剩 {n} 次尝试机会。",
@@ -684,7 +660,7 @@ const TRANSLATIONS = {
     link_resend_otp: "Hantar semula kod", link_change_email: "Guna e-mel lain",
     signin_valid_accounts: "Akaun ujian yang sah:", signin_password_label: "Kata laluan:",
     err_not_eligible: "E-mel ini tiada dalam senarai tetamu untuk acara ini. Sila semak dengan penganjur acara.",
-    err_capacity_full: "Semua tiket untuk e-mel ini sudah log masuk pada peranti lain.",
+    err_capacity_full: "Tiket anda telah berjaya ditebus.",
     err_no_pending_code: "Tiada kod belum disahkan untuk e-mel ini. Sila minta kod baharu.",
     err_expired: "Kod itu telah tamat tempoh. Sila minta kod baharu.",
     err_incorrect_code_otp: "Kod tidak betul. {n} percubaan lagi.",
@@ -1126,7 +1102,7 @@ async function renderEvent(params) {
   }
 
   return `
-    ${topbar(ev.name, t("signed_in_as") + " " + sess.username, { signOut: true })}
+    ${topbar(ev.name, t("signed_in_as") + " " + sess.username)}
     ${langSwitcher()}
     ${refreshButton()}
     <div class="card">${sections}</div>
@@ -2404,7 +2380,8 @@ document.addEventListener("submit", async function (e) {
         }
       }
       const otp = (fd.get("otp") || "").trim();
-      const { data, error } = await sb.functions.invoke("verify-otp", { body: { eventId, email, code: otp } });
+      const origin = `${location.origin}${location.pathname}`;
+      const { data, error } = await sb.functions.invoke("verify-otp", { body: { eventId, email, code: otp, origin } });
       if (error || !data || data.error) {
         if (errorBox) errorBox.textContent = otpErrorMessage(data && data.error, data);
         return;
